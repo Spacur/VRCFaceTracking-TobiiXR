@@ -1,6 +1,6 @@
 # 👀 VRCFaceTracking
 
-Provides real eye tracking and lip tracking in VRChat via the Tobii Stream Engine API implemented as a module for the https://github.com/benaclejames/VRCFaceTracking project.
+Provides real eye tracking in VRChat via the Tobii Stream Engine API implemented as a module for the https://github.com/benaclejames/VRCFaceTracking project.
 
 Please refer to the original project https://github.com/benaclejames/VRCFaceTracking for setup of avatars etc.
 
