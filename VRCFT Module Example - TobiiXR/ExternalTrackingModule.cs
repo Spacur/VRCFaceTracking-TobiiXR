@@ -170,12 +170,17 @@ namespace VRCFT_Module_TobiiXR
                     ParsedtrackingData.right_eye.eye_lid_openness = consumerData.right.blink == tobii_state_bool_t.TOBII_STATE_BOOL_TRUE ? (float)0 : (float)1;
 
                 if (consumerData.left.pupil_position_in_sensor_area_validity == tobii_validity_t.TOBII_VALIDITY_VALID && consumerData.left.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
+                {
                     ParsedtrackingData.left_eye.eye_x = consumerData.left.pupil_position_in_sensor_area_xy.x;
                     ParsedtrackingData.left_eye.eye_y = consumerData.left.pupil_position_in_sensor_area_xy.y;
+                }    
+
 
                 if (consumerData.right.pupil_position_in_sensor_area_validity == tobii_validity_t.TOBII_VALIDITY_VALID && consumerData.right.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
+                {
                     ParsedtrackingData.right_eye.eye_x = consumerData.right.pupil_position_in_sensor_area_xy.x;
                     ParsedtrackingData.right_eye.eye_y = consumerData.right.pupil_position_in_sensor_area_xy.y;
+                }
 
                 TrackingData.Update(ref UnifiedTrackingData.LatestEyeData, ParsedtrackingData);
 
