@@ -1,4 +1,4 @@
-﻿#define TOBIIDEBUG
+﻿// #define TOBIIDEBUG
 
 /* Define TOBIIDEBUG symbol if debug logs are needed, Release configuration causes issues with undefined reference. 
  * Either due to pointer/memory handling, race condition/multithreading differences etc.
@@ -48,18 +48,31 @@ namespace VRCFT_Module_TobiiXR
     // This class contains the overrides for any VRCFT Tracking Data struct functions
     public static class TrackingData
     {
+        // Convert eye X/Y data from 1 to 0 format into 1 to -1 format and then normalise to ensure max values are either 1 or -1 respectively.
+        // TODO : Callibration tool to gather max values for each axis/directions for better accuracy here.
+        private static float NormalisationX = (float)0.5;
+        private static float NormalisationY = (float)0.5;
+
+        private static float ParseEyeData(float EyeData, bool XorY = true)
+        {
+            if (XorY)
+                return ((EyeData * 2) - 1) / NormalisationX;
+            else
+                return ((EyeData * -2) + 1) / NormalisationY;
+        }
+
         // This function parses the external module's single-eye data into a VRCFT-Parseable format
         public static void Update(ref Eye data, TobiiXRExternalTrackingDataEye external)
         {
-            data.Look = new Vector2(external.eye_x, external.eye_y);
+            data.Look = new Vector2(ParseEyeData(external.eye_x), ParseEyeData(external.eye_y, false));
             data.Openness = external.eye_lid_openness;
         }
 
         // This function parses the external module's full-data data into multiple VRCFT-Parseable single-eye structs
         public static void Update(ref EyeTrackingData data, TobiiXRExternalTrackingDataStruct external)
         {
-            Update(ref data.Right, external.left_eye);
-            Update(ref data.Left, external.right_eye);
+            Update(ref data.Right, external.right_eye);
+            Update(ref data.Left, external.left_eye);
         }
     }
 
@@ -73,6 +86,9 @@ namespace VRCFT_Module_TobiiXR
         private IntPtr deviceContext = Marshal.AllocHGlobal(1024);
         private List<string> urls;
         private tobii_error_t result;
+
+        // Initialise struct which tracking data will be inputted into
+        public TobiiXRExternalTrackingDataStruct ParsedtrackingData;
 
         public override (bool eyeSuccess, bool lipSuccess) Initialize(bool eye, bool lip)
         {
@@ -127,7 +143,7 @@ namespace VRCFT_Module_TobiiXR
                     Interop.tobii_wait_for_callbacks(new[] { deviceContext });
                     Debug.Assert(result == tobii_error_t.TOBII_ERROR_NO_ERROR || result == tobii_error_t.TOBII_ERROR_TIMED_OUT);
 
-                    TobiiXRLogger.Log(deviceContext.ToString());
+                    // TobiiXRLogger.Log(deviceContext.ToString());
 
                     // Process callbacks on this thread if data is available
                     Interop.tobii_device_process_callbacks(deviceContext);
@@ -141,12 +157,32 @@ namespace VRCFT_Module_TobiiXR
         // The update function needs to be defined separately in case the user is running with the --vrcft-nothread launch parameter
         public void Update(ref tobii_wearable_consumer_data_t consumerData, IntPtr userData)
         {
-            TobiiXRLogger.Log("Updating inside external module.");
-            
+            // TobiiXRLogger.Log("Updating inside external module.");
+
             if (Status.EyeState == ModuleState.Active)
+            {
                 TobiiXRLogger.Log("Eye data is being utilized.");
-            if (Status.LipState == ModuleState.Active)
-                TobiiXRLogger.Log("Lip data is being utilized.");
+
+                if (consumerData.left.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
+                    ParsedtrackingData.left_eye.eye_lid_openness = consumerData.left.blink == tobii_state_bool_t.TOBII_STATE_BOOL_TRUE ? (float)0 : (float)1;
+
+                if (consumerData.right.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
+                    ParsedtrackingData.right_eye.eye_lid_openness = consumerData.right.blink == tobii_state_bool_t.TOBII_STATE_BOOL_TRUE ? (float)0 : (float)1;
+
+                if (consumerData.left.pupil_position_in_sensor_area_validity == tobii_validity_t.TOBII_VALIDITY_VALID && consumerData.left.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
+                    ParsedtrackingData.left_eye.eye_x = consumerData.left.pupil_position_in_sensor_area_xy.x;
+                    ParsedtrackingData.left_eye.eye_y = consumerData.left.pupil_position_in_sensor_area_xy.y;
+
+                if (consumerData.right.pupil_position_in_sensor_area_validity == tobii_validity_t.TOBII_VALIDITY_VALID && consumerData.right.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
+                    ParsedtrackingData.right_eye.eye_x = consumerData.right.pupil_position_in_sensor_area_xy.x;
+                    ParsedtrackingData.right_eye.eye_y = consumerData.right.pupil_position_in_sensor_area_xy.y;
+
+                TrackingData.Update(ref UnifiedTrackingData.LatestEyeData, ParsedtrackingData);
+
+                TobiiXRLogger.Log(UnifiedTrackingData.LatestEyeData.Left.Openness.ToString() + " " + UnifiedTrackingData.LatestEyeData.Right.Openness.ToString());
+                TobiiXRLogger.Log(UnifiedTrackingData.LatestEyeData.Left.Look.x.ToString() + " " + UnifiedTrackingData.LatestEyeData.Left.Look.y.ToString());
+                TobiiXRLogger.Log(UnifiedTrackingData.LatestEyeData.Right.Look.x.ToString() + " " + UnifiedTrackingData.LatestEyeData.Right.Look.y.ToString());
+            }
         }
 
         // A chance to de-initialize everything. This runs synchronously inside main game thread. Do not touch any Unity objects here.
