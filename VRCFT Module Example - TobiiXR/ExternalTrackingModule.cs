@@ -29,29 +29,21 @@ namespace VRCFT_Module_TobiiXR
         };
     }
 
-    // TobiiXR "single-eye" data response.
-    public struct TobiiXRExternalTrackingDataEye
+    // TobiiXR "single-eye" desktop data response.
+    public struct TobiiXRExternalTrackingDesktopDataEye
     {
-        public float eye_lid_openness;
+        public tobii_validity_t validity;
         public float eye_x;
         public float eye_y;
-    }
-    
-    // TobiiXR "full-data" response from the external tracking system.
-    public struct TobiiXRExternalTrackingDataStruct
-    {
-        public TobiiXRExternalTrackingDataEye left_eye;
-        public TobiiXRExternalTrackingDataEye right_eye;
-    }   
-    
-    
+    }  
+     
     // This class contains the overrides for any VRCFT Tracking Data struct functions
     public static class TrackingData
     {
         // Convert eye X/Y data from 1 to 0 format into 1 to -1 format and then normalise to ensure max values are either 1 or -1 respectively.
         // TODO : Callibration tool to gather max values for each axis/directions for better accuracy here.
-        private static float NormalisationX = (float)0.5;
-        private static float NormalisationY = (float)0.5;
+        private static float NormalisationX = 0.5f;
+        private static float NormalisationY = 0.5f;
 
         private static float ParseEyeData(float EyeData, bool XorY = true)
         {
@@ -62,17 +54,11 @@ namespace VRCFT_Module_TobiiXR
         }
 
         // This function parses the external module's single-eye data into a VRCFT-Parseable format
-        public static void Update(ref Eye data, TobiiXRExternalTrackingDataEye external)
+        public static void Update(ref EyeTrackingData data, TobiiXRExternalTrackingDesktopDataEye external)
         {
-            data.Look = new Vector2(ParseEyeData(external.eye_x), ParseEyeData(external.eye_y, false));
-            data.Openness = external.eye_lid_openness;
-        }
-
-        // This function parses the external module's full-data data into multiple VRCFT-Parseable single-eye structs
-        public static void Update(ref EyeTrackingData data, TobiiXRExternalTrackingDataStruct external)
-        {
-            Update(ref data.Right, external.right_eye);
-            Update(ref data.Left, external.left_eye);
+            var look = new Vector2(ParseEyeData(external.eye_x), ParseEyeData(external.eye_y, false));
+            data.Left.Look = look;
+            data.Right.Look = look;
         }
     }
 
@@ -86,13 +72,13 @@ namespace VRCFT_Module_TobiiXR
         private IntPtr deviceContext = Marshal.AllocHGlobal(1024);
         private List<string> urls;
         private tobii_error_t result;
+        private bool isUserPresent = false;
 
         // Initialise struct which tracking data will be inputted into
-        public TobiiXRExternalTrackingDataStruct ParsedtrackingData;
+        public TobiiXRExternalTrackingDesktopDataEye ParsedtrackingData;
 
         public override (bool eyeSuccess, bool lipSuccess) Initialize(bool eye, bool lip)
         {
-
             TobiiXRLogger.Log("Initializing inside external module");
 
             // Extract Embedded Tobii Stream Engine DLL for use in Tobii.StreamEngine.Interop.cs
@@ -130,9 +116,9 @@ namespace VRCFT_Module_TobiiXR
         {
             return () =>
             {
-
                 // Subscribe to consumer data which will be sent to the classes local update method
-                result = Interop.tobii_wearable_consumer_data_subscribe(deviceContext, Update);
+                result = Interop.tobii_gaze_point_subscribe(deviceContext, Update);
+                result = Interop.tobii_user_presence_subscribe(deviceContext, Presense);
                 TobiiXRLogger.Log(result.ToString());
                 // Debug.Assert(result == tobii_error_t.TOBII_ERROR_NO_ERROR);
 
@@ -154,36 +140,37 @@ namespace VRCFT_Module_TobiiXR
             };
         }
 
-        // The update function needs to be defined separately in case the user is running with the --vrcft-nothread launch parameter
-        public void Update(ref tobii_wearable_consumer_data_t consumerData, IntPtr userData)
+        private void Presense(tobii_user_presence_status_t status, long timestamp_us, IntPtr user_data)
         {
-            // TobiiXRLogger.Log("Updating inside external module.");
+            switch (status)
+            {
+                case tobii_user_presence_status_t.TOBII_USER_PRESENCE_STATUS_PRESENT:
+                    isUserPresent = true;
+                    break;
+                default:
+                    isUserPresent = false;
+                    break;
+            }
+        }
 
-            if (Status.EyeState == ModuleState.Active)
+        // TobiiXRLogger.Log("Updating inside external module.");
+        private void Update(ref tobii_gaze_point_t gaze_point, IntPtr user_data)
+        {
+            if (Status.EyeState == ModuleState.Active && isUserPresent)
             {
                 TobiiXRLogger.Log("Eye data is being utilized.");
-
-                if (consumerData.left.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
-                    ParsedtrackingData.left_eye.eye_lid_openness = consumerData.left.blink == tobii_state_bool_t.TOBII_STATE_BOOL_TRUE ? (float)0 : (float)1;
-
-                if (consumerData.right.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
-                    ParsedtrackingData.right_eye.eye_lid_openness = consumerData.right.blink == tobii_state_bool_t.TOBII_STATE_BOOL_TRUE ? (float)0 : (float)1;
-
-                if (consumerData.left.pupil_position_in_sensor_area_validity == tobii_validity_t.TOBII_VALIDITY_VALID && consumerData.left.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
+                
+                if (gaze_point.validity == tobii_validity_t.TOBII_VALIDITY_VALID)
                 {
-                    ParsedtrackingData.left_eye.eye_x = consumerData.left.pupil_position_in_sensor_area_xy.x;
-                    ParsedtrackingData.left_eye.eye_y = consumerData.left.pupil_position_in_sensor_area_xy.y;
-                }    
+                    ParsedtrackingData.eye_x = gaze_point.position.x;
+                    ParsedtrackingData.eye_y = gaze_point.position.y;
 
+                    ParsedtrackingData.eye_x = gaze_point.position.x;
+                    ParsedtrackingData.eye_y = gaze_point.position.y;
 
-                if (consumerData.right.pupil_position_in_sensor_area_validity == tobii_validity_t.TOBII_VALIDITY_VALID && consumerData.right.blink_validity == tobii_validity_t.TOBII_VALIDITY_VALID)
-                {
-                    ParsedtrackingData.right_eye.eye_x = consumerData.right.pupil_position_in_sensor_area_xy.x;
-                    ParsedtrackingData.right_eye.eye_y = consumerData.right.pupil_position_in_sensor_area_xy.y;
+                    TrackingData.Update(ref UnifiedTrackingData.LatestEyeData, ParsedtrackingData);
                 }
-
-                TrackingData.Update(ref UnifiedTrackingData.LatestEyeData, ParsedtrackingData);
-
+                
                 TobiiXRLogger.Log(UnifiedTrackingData.LatestEyeData.Left.Openness.ToString() + " " + UnifiedTrackingData.LatestEyeData.Right.Openness.ToString());
                 TobiiXRLogger.Log(UnifiedTrackingData.LatestEyeData.Left.Look.x.ToString() + " " + UnifiedTrackingData.LatestEyeData.Left.Look.y.ToString());
                 TobiiXRLogger.Log(UnifiedTrackingData.LatestEyeData.Right.Look.x.ToString() + " " + UnifiedTrackingData.LatestEyeData.Right.Look.y.ToString());
@@ -193,7 +180,8 @@ namespace VRCFT_Module_TobiiXR
         // A chance to de-initialize everything. This runs synchronously inside main game thread. Do not touch any Unity objects here.
         public override void Teardown()
         {
-            Interop.tobii_wearable_consumer_data_unsubscribe(deviceContext);
+            Interop.tobii_user_presence_unsubscribe(deviceContext);
+            Interop.tobii_gaze_point_unsubscribe(deviceContext);
             Interop.tobii_device_destroy(deviceContext);
             Interop.tobii_api_destroy(apiContext);
             Marshal.FreeHGlobal(deviceContext);
